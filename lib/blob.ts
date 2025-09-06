@@ -206,12 +206,23 @@ export async function getJobData(jobId: string): Promise<Job | null> {
     if (mode === 'blob') {
       console.log(`🚨 Getting blob data for job ${jobId}`)
       try {
-        // Get the blob info first
-        const blob = await head(`jobs/${jobId}.json`)
-        console.log(`🚨 Found blob:`, blob.url)
+        // List all blobs to see what's actually stored
+        const { blobs } = await list()
+        console.log(`🚨 Available blobs:`, blobs.map(b => b.pathname))
+        
+        // Look for our specific job file
+        const targetPath = `jobs/${jobId}.json`
+        const jobBlob = blobs.find(b => b.pathname === targetPath)
+        
+        if (!jobBlob) {
+          console.log(`🚨 Blob not found for path: ${targetPath}`)
+          return null
+        }
+        
+        console.log(`🚨 Found job blob:`, jobBlob.url)
         
         // Fetch the actual data from the blob URL
-        const response = await fetch(blob.url)
+        const response = await fetch(jobBlob.url)
         if (!response.ok) {
           console.log(`🚨 Blob fetch failed:`, response.status)
           return null
