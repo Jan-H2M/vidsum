@@ -4,6 +4,7 @@ import { getJobData } from '@/lib/blob'
 
 export async function GET(request: NextRequest) {
   try {
+    console.log(`Status check for jobId at ${new Date().toISOString()}`)
     const { searchParams } = new URL(request.url)
     const jobId = searchParams.get('jobId')
 
