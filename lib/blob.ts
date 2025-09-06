@@ -289,7 +289,12 @@ export async function getTranscript(jobId: string): Promise<TranscriptSegment[] 
       if (!data) return null
       return JSON.parse(data)
     } else {
-      const response = await fetch(`${process.env.BLOB_READ_WRITE_TOKEN}/transcripts/${jobId}.json`)
+      // Use proper blob API
+      const { blobs } = await list()
+      const targetPath = `transcripts/${jobId}.json`
+      const blob = blobs.find(b => b.pathname === targetPath)
+      if (!blob) return null
+      const response = await fetch(blob.url)
       if (!response.ok) return null
       return await response.json()
     }
@@ -338,7 +343,12 @@ export async function getVisionCaptions(jobId: string): Promise<VisionCaption[] 
       if (!data) return null
       return JSON.parse(data)
     } else {
-      const response = await fetch(`${process.env.BLOB_READ_WRITE_TOKEN}/vision/${jobId}.json`)
+      // Use proper blob API
+      const { blobs } = await list()
+      const targetPath = `vision/${jobId}.json`
+      const blob = blobs.find(b => b.pathname === targetPath)
+      if (!blob) return null
+      const response = await fetch(blob.url)
       if (!response.ok) return null
       return await response.json()
     }
@@ -387,7 +397,12 @@ export async function getSummary(jobId: string): Promise<Summary | null> {
       if (!data) return null
       return JSON.parse(data)
     } else {
-      const response = await fetch(`${process.env.BLOB_READ_WRITE_TOKEN}/summaries/${jobId}.json`)
+      // Use proper blob API
+      const { blobs } = await list()
+      const targetPath = `summaries/${jobId}.json`
+      const blob = blobs.find(b => b.pathname === targetPath)
+      if (!blob) return null
+      const response = await fetch(blob.url)
       if (!response.ok) return null
       return await response.json()
     }
