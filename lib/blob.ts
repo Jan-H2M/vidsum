@@ -3,6 +3,11 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { Job, Summary, TranscriptSegment, VisionCaption } from './types'
 
+// EMERGENCY DEBUG - Log module load
+console.log('🚨🚨🚨 BLOB MODULE LOADING - NEW VERSION 🚨🚨🚨')
+console.log('Module load NODE_ENV:', process.env.NODE_ENV)
+console.log('Module load CWD:', process.cwd())
+
 // In-memory storage for serverless fallback
 const memoryStorage = new Map<string, any>()
 
@@ -156,28 +161,39 @@ async function deleteFromMemory(key: string): Promise<void> {
 }
 
 export async function saveJobData(jobId: string, job: Job): Promise<void> {
+  console.log('🚨 NUCLEAR SAVEJOBDATA CALLED - NEW CODE VERSION 🚨')
+  console.log(`NODE_ENV: ${process.env.NODE_ENV}`)
+  console.log(`CWD: ${process.cwd()}`)
+  
   const data = JSON.stringify(job)
   const mode = getStorageMode()
   
-  // NEVER test filesystem in production - just use the detected mode
-  console.log(`saveJobData: Using ${mode} storage for job ${jobId}`)
+  console.log(`🚨 saveJobData: NUCLEAR MODE = ${mode} for job ${jobId}`)
+  
+  // ABSOLUTE SAFEGUARD - if somehow mode is 'local' in production, force memory
+  if (process.env.NODE_ENV === 'production' && mode === 'local') {
+    console.error('🚨 EMERGENCY: Detected local mode in production - FORCING MEMORY')
+    storageMode = 'memory'
+    await saveToMemory(`jobs/${jobId}.json`, data)
+    return
+  }
   
   try {
     if (mode === 'blob') {
+      console.log('🚨 Using BLOB storage')
       await put(`jobs/${jobId}.json`, data, {
         access: 'public',
       })
     } else if (mode === 'local') {
-      // Only use local if we're absolutely sure (development only)
+      console.log('🚨 Using LOCAL storage (dev only)')
       await saveToLocal(`jobs/${jobId}.json`, data)
     } else {
-      // Memory storage - always safe
+      console.log('🚨 Using MEMORY storage')
       await saveToMemory(`jobs/${jobId}.json`, data)
     }
   } catch (error) {
-    // Ultimate fallback - memory storage
-    console.error(`${mode} storage failed for job ${jobId}:`, error)
-    console.log('Falling back to memory storage')
+    console.error(`🚨 ${mode} storage failed for job ${jobId}:`, error)
+    console.log('🚨 EMERGENCY FALLBACK to memory storage')
     storageMode = 'memory'
     await saveToMemory(`jobs/${jobId}.json`, data)
   }
