@@ -144,6 +144,7 @@ export async function saveJobData(jobId: string, job: Job): Promise<void> {
     if (mode === 'blob') {
       await put(`jobs/${jobId}.json`, data, {
         access: 'public',
+        addRandomSuffix: false,
       })
     } else if (mode === 'local') {
       await saveToLocal(`jobs/${jobId}.json`, data)
@@ -171,8 +172,11 @@ export async function getJobData(jobId: string): Promise<Job | null> {
           return null
         }
         
+        console.log('Fetching blob URL:', jobBlob.url)
         const response = await fetch(jobBlob.url)
+        console.log('Blob fetch response status:', response.status)
         if (!response.ok) {
+          console.log('Blob fetch failed with status:', response.status, await response.text())
           return null
         }
         
