@@ -35,52 +35,61 @@ async function canUseFilesystem(): Promise<boolean> {
 }
 
 function getStorageMode(): 'local' | 'memory' | 'blob' {
+  // EMERGENCY: Always use memory storage in production
+  // This is a nuclear option to stop the EROFS errors
+  if (process.env.NODE_ENV === 'production') {
+    const hasBlob = process.env.BLOB_READ_WRITE_TOKEN && 
+      process.env.BLOB_READ_WRITE_TOKEN !== 'your_vercel_blob_token_here'
+    
+    if (hasBlob) {
+      console.log('EMERGENCY MODE: Using BLOB storage (production + token)')
+      return 'blob'
+    } else {
+      console.log('EMERGENCY MODE: Using MEMORY storage (production environment)')
+      return 'memory'
+    }
+  }
+
   if (storageMode) return storageMode
 
   const hasBlob = process.env.BLOB_READ_WRITE_TOKEN && 
     process.env.BLOB_READ_WRITE_TOKEN !== 'your_vercel_blob_token_here'
     
-  // Detect Vercel serverless environment by path and environment
+  // Detect ANY serverless environment
   const cwd = process.cwd()
   
-  // AGGRESSIVE Vercel detection - if ANY of these are true, use memory
   const isServerless = !!(
-    cwd.startsWith('/var/task') ||                    // Vercel serverless path
-    cwd.startsWith('/var/runtime') ||                 // Alternative AWS path
-    process.env.LAMBDA_TASK_ROOT ||                   // Always set in Vercel
-    process.env.LAMBDA_RUNTIME_DIR ||                 // Always set in Vercel  
-    process.env.AWS_REGION ||                         // Set in Vercel functions
-    process.env.AWS_LAMBDA_FUNCTION_NAME ||          // AWS Lambda
-    process.env.VERCEL === '1' ||                     // If system vars enabled
-    process.env.VERCEL_ENV ||                         // If system vars enabled
-    process.env.NETLIFY ||                            // Netlify
-    process.env.RAILWAY_ENVIRONMENT ||               // Railway
-    process.env.RENDER ||                             // Render
-    (process.env.NODE_ENV === 'production')          // ANY production environment
+    cwd.includes('/var/') ||                          // ANY /var path (serverless)
+    cwd.includes('lambda') ||                         // Lambda in path
+    cwd.includes('serverless') ||                     // Serverless in path
+    process.env.LAMBDA_TASK_ROOT ||                   
+    process.env.LAMBDA_RUNTIME_DIR ||                 
+    process.env.AWS_REGION ||                         
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||          
+    process.env.VERCEL === '1' ||                     
+    process.env.VERCEL_ENV ||                         
+    process.env.NETLIFY ||                            
+    process.env.RAILWAY_ENVIRONMENT ||               
+    process.env.RENDER
   )
   
-  console.log('AGGRESSIVE Storage detection:', {
+  console.log('EMERGENCY Storage detection:', {
     cwd,
     NODE_ENV: process.env.NODE_ENV,
-    VERCEL: process.env.VERCEL,
-    VERCEL_ENV: process.env.VERCEL_ENV,
-    LAMBDA_TASK_ROOT: process.env.LAMBDA_TASK_ROOT,
-    LAMBDA_RUNTIME_DIR: process.env.LAMBDA_RUNTIME_DIR,
-    AWS_REGION: process.env.AWS_REGION,
-    hasBlob,
-    isServerless
+    isServerless,
+    hasBlob
   })
   
-  // Priority order: Blob > Memory (almost always) > Local (dev only)
   if (hasBlob) {
     storageMode = 'blob'
-    console.log('Using BLOB storage (has token)')
+    console.log('EMERGENCY: Using BLOB storage')
   } else if (isServerless) {
     storageMode = 'memory'
-    console.log('Using MEMORY storage (serverless detected)')
+    console.log('EMERGENCY: Using MEMORY storage (serverless)')
   } else {
-    storageMode = 'memory'  // ALWAYS default to memory now!
-    console.log('Using MEMORY storage (safe default)')
+    // ONLY use local in development
+    storageMode = 'memory'
+    console.log('EMERGENCY: Using MEMORY storage (default)')
   }
   
   return storageMode
