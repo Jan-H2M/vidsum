@@ -116,10 +116,8 @@ export async function analyzeImagesWithVision(captions: VisionCaption[]): Promis
   )
   
   return results
-    .filter((result): result is PromiseFulfilledResult<VisionCaption> => 
-      result.status === 'fulfilled'
-    )
-    .map(result => result.value)
+    .filter(result => result.status === 'fulfilled')
+    .map(result => (result as PromiseFulfilledResult<VisionCaption>).value)
 }
 
 export async function extractOCRFromImage(imageUrl: string): Promise<string> {
