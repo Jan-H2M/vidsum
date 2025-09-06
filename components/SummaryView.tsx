@@ -248,7 +248,7 @@ export function SummaryView({ summary, originalUrl }: SummaryViewProps) {
                       {qa.timestamp && (
                         <TimestampButton 
                           timestamp={qa.timestamp}
-                          onClick={() => handleTimestampClick(qa.timestamp)}
+                          onClick={() => handleTimestampClick(qa.timestamp!)}
                           disabled={!originalUrl || !isYouTubeUrl(originalUrl)}
                         />
                       )}
