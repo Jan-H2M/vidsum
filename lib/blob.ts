@@ -3,10 +3,6 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { Job, Summary, TranscriptSegment, VisionCaption } from './types'
 
-// EMERGENCY DEBUG - Log module load
-console.log('🚨🚨🚨 BLOB MODULE LOADING - NEW VERSION 🚨🚨🚨')
-console.log('Module load NODE_ENV:', process.env.NODE_ENV)
-console.log('Module load CWD:', process.cwd())
 
 // In-memory storage for serverless fallback
 const memoryStorage = new Map<string, any>()
@@ -29,10 +25,8 @@ async function canUseFilesystem(): Promise<boolean> {
     await fs.unlink(testFile)
     await fs.rmdir(testDir)
     
-    console.log('Filesystem write test: SUCCESS')
     return true
   } catch (error) {
-    console.log('Filesystem write test: FAILED', error)
     return false
   } finally {
     filesystemTestAttempted = true
@@ -40,19 +34,11 @@ async function canUseFilesystem(): Promise<boolean> {
 }
 
 function getStorageMode(): 'local' | 'memory' | 'blob' {
-  // EMERGENCY: Always use memory storage in production
-  // This is a nuclear option to stop the EROFS errors
   if (process.env.NODE_ENV === 'production') {
     const hasBlob = process.env.BLOB_READ_WRITE_TOKEN && 
       process.env.BLOB_READ_WRITE_TOKEN !== 'your_vercel_blob_token_here'
     
-    if (hasBlob) {
-      console.log('EMERGENCY MODE: Using BLOB storage (production + token)')
-      return 'blob'
-    } else {
-      console.log('EMERGENCY MODE: Using MEMORY storage (production environment)')
-      return 'memory'
-    }
+    return hasBlob ? 'blob' : 'memory'
   }
 
   if (storageMode) return storageMode
@@ -78,23 +64,13 @@ function getStorageMode(): 'local' | 'memory' | 'blob' {
     process.env.RENDER
   )
   
-  console.log('EMERGENCY Storage detection:', {
-    cwd,
-    NODE_ENV: process.env.NODE_ENV,
-    isServerless,
-    hasBlob
-  })
   
   if (hasBlob) {
     storageMode = 'blob'
-    console.log('EMERGENCY: Using BLOB storage')
   } else if (isServerless) {
     storageMode = 'memory'
-    console.log('EMERGENCY: Using MEMORY storage (serverless)')
   } else {
-    // ONLY use local in development
     storageMode = 'memory'
-    console.log('EMERGENCY: Using MEMORY storage (default)')
   }
   
   return storageMode
@@ -161,39 +137,21 @@ async function deleteFromMemory(key: string): Promise<void> {
 }
 
 export async function saveJobData(jobId: string, job: Job): Promise<void> {
-  console.log('🚨 NUCLEAR SAVEJOBDATA CALLED - NEW CODE VERSION 🚨')
-  console.log(`NODE_ENV: ${process.env.NODE_ENV}`)
-  console.log(`CWD: ${process.cwd()}`)
-  
   const data = JSON.stringify(job)
   const mode = getStorageMode()
   
-  console.log(`🚨 saveJobData: NUCLEAR MODE = ${mode} for job ${jobId}`)
-  
-  // ABSOLUTE SAFEGUARD - if somehow mode is 'local' in production, force memory
-  if (process.env.NODE_ENV === 'production' && mode === 'local') {
-    console.error('🚨 EMERGENCY: Detected local mode in production - FORCING MEMORY')
-    storageMode = 'memory'
-    await saveToMemory(`jobs/${jobId}.json`, data)
-    return
-  }
-  
   try {
     if (mode === 'blob') {
-      console.log('🚨 Using BLOB storage')
       await put(`jobs/${jobId}.json`, data, {
         access: 'public',
       })
     } else if (mode === 'local') {
-      console.log('🚨 Using LOCAL storage (dev only)')
       await saveToLocal(`jobs/${jobId}.json`, data)
     } else {
-      console.log('🚨 Using MEMORY storage')
       await saveToMemory(`jobs/${jobId}.json`, data)
     }
   } catch (error) {
-    console.error(`🚨 ${mode} storage failed for job ${jobId}:`, error)
-    console.log('🚨 EMERGENCY FALLBACK to memory storage')
+    console.error(`${mode} storage failed for job ${jobId}:`, error)
     storageMode = 'memory'
     await saveToMemory(`jobs/${jobId}.json`, data)
   }
@@ -204,35 +162,23 @@ export async function getJobData(jobId: string): Promise<Job | null> {
     const mode = getStorageMode()
     
     if (mode === 'blob') {
-      console.log(`🚨 Getting blob data for job ${jobId}`)
       try {
-        // List all blobs to see what's actually stored
         const { blobs } = await list()
-        console.log(`🚨 Available blobs:`, blobs.map(b => b.pathname))
-        
-        // Look for our specific job file
         const targetPath = `jobs/${jobId}.json`
         const jobBlob = blobs.find(b => b.pathname === targetPath)
         
         if (!jobBlob) {
-          console.log(`🚨 Blob not found for path: ${targetPath}`)
           return null
         }
         
-        console.log(`🚨 Found job blob:`, jobBlob.url)
-        
-        // Fetch the actual data from the blob URL
         const response = await fetch(jobBlob.url)
         if (!response.ok) {
-          console.log(`🚨 Blob fetch failed:`, response.status)
           return null
         }
         
-        const data = await response.json()
-        console.log(`🚨 Successfully retrieved blob data`)
-        return data
+        return await response.json()
       } catch (blobError) {
-        console.warn(`🚨 Blob retrieval error:`, blobError)
+        console.warn('Blob retrieval error:', blobError)
         return null
       }
     } else if (mode === 'local') {
