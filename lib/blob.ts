@@ -160,11 +160,11 @@ export async function getJobData(jobId: string): Promise<Job | null> {
           return null
         }
         
-        console.log('Fetching blob URL:', jobBlob.url)
-        const response = await fetch(jobBlob.url)
-        console.log('Blob fetch response status:', response.status)
+        // Try downloadUrl first, fallback to url
+        const fetchUrl = jobBlob.downloadUrl || jobBlob.url
+        const response = await fetch(fetchUrl)
         if (!response.ok) {
-          console.log('Blob fetch failed with status:', response.status, await response.text())
+          console.warn(`Blob fetch failed: ${response.status} for ${fetchUrl}`)
           return null
         }
         
