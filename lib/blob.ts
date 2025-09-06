@@ -1,4 +1,4 @@
-import { put, del, list } from '@vercel/blob'
+import { put, del, list, head } from '@vercel/blob'
 import { promises as fs } from 'fs'
 import path from 'path'
 import { Job, Summary, TranscriptSegment, VisionCaption } from './types'
@@ -204,9 +204,26 @@ export async function getJobData(jobId: string): Promise<Job | null> {
     const mode = getStorageMode()
     
     if (mode === 'blob') {
-      const response = await fetch(`${process.env.BLOB_READ_WRITE_TOKEN}/jobs/${jobId}.json`)
-      if (!response.ok) return null
-      return await response.json()
+      console.log(`🚨 Getting blob data for job ${jobId}`)
+      try {
+        // Get the blob info first
+        const blob = await head(`jobs/${jobId}.json`)
+        console.log(`🚨 Found blob:`, blob.url)
+        
+        // Fetch the actual data from the blob URL
+        const response = await fetch(blob.url)
+        if (!response.ok) {
+          console.log(`🚨 Blob fetch failed:`, response.status)
+          return null
+        }
+        
+        const data = await response.json()
+        console.log(`🚨 Successfully retrieved blob data`)
+        return data
+      } catch (blobError) {
+        console.warn(`🚨 Blob retrieval error:`, blobError)
+        return null
+      }
     } else if (mode === 'local') {
       const data = await readFromLocal(`jobs/${jobId}.json`)
       if (!data) return null
