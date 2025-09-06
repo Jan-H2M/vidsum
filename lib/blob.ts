@@ -7,9 +7,12 @@ import { Job, Summary, TranscriptSegment, VisionCaption } from './types'
 const HAS_BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN && 
   process.env.BLOB_READ_WRITE_TOKEN !== 'your_vercel_blob_token_here'
 
-const USE_LOCAL_STORAGE = process.env.NODE_ENV !== 'production'
+// Detect if we're in Vercel's serverless environment
+const IS_VERCEL = process.env.VERCEL === '1' || process.env.VERCEL_ENV
 
-const USE_MEMORY_STORAGE = process.env.NODE_ENV === 'production' && !HAS_BLOB_TOKEN
+const USE_LOCAL_STORAGE = process.env.NODE_ENV !== 'production' && !IS_VERCEL
+
+const USE_MEMORY_STORAGE = (process.env.NODE_ENV === 'production' || IS_VERCEL) && !HAS_BLOB_TOKEN
 
 // In-memory storage for serverless fallback
 const memoryStorage = new Map<string, any>()
@@ -18,7 +21,12 @@ const LOCAL_STORAGE_DIR = path.join(process.cwd(), '.vidsum-storage')
 
 async function ensureLocalDir() {
   if (USE_LOCAL_STORAGE) {
-    await fs.mkdir(LOCAL_STORAGE_DIR, { recursive: true })
+    try {
+      await fs.mkdir(LOCAL_STORAGE_DIR, { recursive: true })
+    } catch (error) {
+      // If we can't create directories (read-only filesystem), we should use memory storage
+      console.warn('Cannot create local storage directory, using memory storage:', error)
+    }
   }
 }
 
