@@ -108,8 +108,8 @@ export async function analyzeImagesWithVision(captions: VisionCaption[]): Promis
       return {
         ...caption,
         caption: analysis.caption,
-        objects: analysis.objects,
-        labels: analysis.labels,
+        objects: analysis.objects || [],
+        labels: analysis.labels || [],
         ocrText: extractTextFromCaption(analysis.caption) // GPT-4V can read text directly
       }
     })
