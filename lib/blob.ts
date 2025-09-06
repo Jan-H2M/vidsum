@@ -3,30 +3,58 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { Job, Summary, TranscriptSegment, VisionCaption } from './types'
 
-// Use local storage for development, Vercel Blob for production, memory as fallback
-const HAS_BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN && 
-  process.env.BLOB_READ_WRITE_TOKEN !== 'your_vercel_blob_token_here'
-
-// Detect if we're in Vercel's serverless environment
-const IS_VERCEL = process.env.VERCEL === '1' || process.env.VERCEL_ENV
-
-const USE_LOCAL_STORAGE = process.env.NODE_ENV !== 'production' && !IS_VERCEL
-
-const USE_MEMORY_STORAGE = (process.env.NODE_ENV === 'production' || IS_VERCEL) && !HAS_BLOB_TOKEN
-
 // In-memory storage for serverless fallback
 const memoryStorage = new Map<string, any>()
+
+// Storage mode cache
+let storageMode: 'local' | 'memory' | 'blob' | null = null
+
+function getStorageMode(): 'local' | 'memory' | 'blob' {
+  if (storageMode) return storageMode
+
+  const hasBlob = process.env.BLOB_READ_WRITE_TOKEN && 
+    process.env.BLOB_READ_WRITE_TOKEN !== 'your_vercel_blob_token_here'
+    
+  // Detect serverless environment (Vercel, Netlify, AWS Lambda, etc.)
+  const isServerless = !!(
+    process.env.VERCEL === '1' || 
+    process.env.VERCEL_ENV || 
+    process.env.NETLIFY ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.LAMBDA_TASK_ROOT ||
+    process.env.NODE_ENV === 'production' && process.env.CI
+  )
+  
+  console.log('Storage detection:', {
+    NODE_ENV: process.env.NODE_ENV,
+    VERCEL: process.env.VERCEL,
+    VERCEL_ENV: process.env.VERCEL_ENV,
+    hasBlob,
+    isServerless
+  })
+  
+  if (hasBlob) {
+    storageMode = 'blob'
+  } else if (isServerless) {
+    storageMode = 'memory'
+  } else {
+    storageMode = 'local'
+  }
+  
+  console.log(`Using ${storageMode} storage mode`)
+  return storageMode
+}
 
 const LOCAL_STORAGE_DIR = path.join(process.cwd(), '.vidsum-storage')
 
 async function ensureLocalDir() {
-  if (USE_LOCAL_STORAGE) {
-    try {
-      await fs.mkdir(LOCAL_STORAGE_DIR, { recursive: true })
-    } catch (error) {
-      // If we can't create directories (read-only filesystem), we should use memory storage
-      console.warn('Cannot create local storage directory, using memory storage:', error)
-    }
+  try {
+    await fs.mkdir(LOCAL_STORAGE_DIR, { recursive: true })
+  } catch (error) {
+    // If we can't create directories (read-only filesystem), fallback to memory
+    console.warn('Cannot create local storage directory, switching to memory storage:', error)
+    storageMode = 'memory'
+    throw error
   }
 }
 
@@ -74,25 +102,39 @@ async function deleteFromMemory(key: string): Promise<void> {
 
 export async function saveJobData(jobId: string, job: Job): Promise<void> {
   const data = JSON.stringify(job)
+  const mode = getStorageMode()
   
-  if (USE_LOCAL_STORAGE) {
-    await saveToLocal(`jobs/${jobId}.json`, data)
-  } else if (USE_MEMORY_STORAGE) {
-    await saveToMemory(`jobs/${jobId}.json`, data)
-  } else {
-    await put(`jobs/${jobId}.json`, data, {
-      access: 'public',
-    })
+  try {
+    if (mode === 'local') {
+      await saveToLocal(`jobs/${jobId}.json`, data)
+    } else if (mode === 'memory') {
+      await saveToMemory(`jobs/${jobId}.json`, data)
+    } else {
+      await put(`jobs/${jobId}.json`, data, {
+        access: 'public',
+      })
+    }
+  } catch (error) {
+    // Fallback to memory if filesystem operations fail
+    if (mode === 'local') {
+      console.warn('Local storage failed, falling back to memory:', error)
+      storageMode = 'memory'
+      await saveToMemory(`jobs/${jobId}.json`, data)
+    } else {
+      throw error
+    }
   }
 }
 
 export async function getJobData(jobId: string): Promise<Job | null> {
   try {
-    if (USE_LOCAL_STORAGE) {
+    const mode = getStorageMode()
+    
+    if (mode === 'local') {
       const data = await readFromLocal(`jobs/${jobId}.json`)
       if (!data) return null
       return JSON.parse(data.toString())
-    } else if (USE_MEMORY_STORAGE) {
+    } else if (mode === 'memory') {
       const data = await readFromMemory(`jobs/${jobId}.json`)
       if (!data) return null
       return JSON.parse(data)
@@ -101,118 +143,199 @@ export async function getJobData(jobId: string): Promise<Job | null> {
       if (!response.ok) return null
       return await response.json()
     }
-  } catch {
+  } catch (error) {
+    console.warn('Failed to get job data:', error)
     return null
   }
 }
 
 export async function saveTranscript(jobId: string, segments: TranscriptSegment[]): Promise<string> {
   const data = JSON.stringify(segments)
+  const mode = getStorageMode()
   
-  if (USE_LOCAL_STORAGE) {
-    return await saveToLocal(`transcripts/${jobId}.json`, data)
-  } else if (USE_MEMORY_STORAGE) {
-    return await saveToMemory(`transcripts/${jobId}.json`, data)
-  } else {
-    const blob = await put(`transcripts/${jobId}.json`, data, {
-      access: 'public',
-    })
-    return blob.url
+  try {
+    if (mode === 'local') {
+      return await saveToLocal(`transcripts/${jobId}.json`, data)
+    } else if (mode === 'memory') {
+      return await saveToMemory(`transcripts/${jobId}.json`, data)
+    } else {
+      const blob = await put(`transcripts/${jobId}.json`, data, {
+        access: 'public',
+      })
+      return blob.url
+    }
+  } catch (error) {
+    if (mode === 'local') {
+      console.warn('Local storage failed, falling back to memory:', error)
+      storageMode = 'memory'
+      return await saveToMemory(`transcripts/${jobId}.json`, data)
+    } else {
+      throw error
+    }
   }
 }
 
 export async function getTranscript(jobId: string): Promise<TranscriptSegment[] | null> {
   try {
-    if (USE_LOCAL_STORAGE) {
+    const mode = getStorageMode()
+    
+    if (mode === 'local') {
       const data = await readFromLocal(`transcripts/${jobId}.json`)
       if (!data) return null
       return JSON.parse(data.toString())
+    } else if (mode === 'memory') {
+      const data = await readFromMemory(`transcripts/${jobId}.json`)
+      if (!data) return null
+      return JSON.parse(data)
     } else {
       const response = await fetch(`${process.env.BLOB_READ_WRITE_TOKEN}/transcripts/${jobId}.json`)
       if (!response.ok) return null
       return await response.json()
     }
-  } catch {
+  } catch (error) {
+    console.warn('Failed to get transcript:', error)
     return null
   }
 }
 
 export async function saveVisionCaptions(jobId: string, captions: VisionCaption[]): Promise<string> {
   const data = JSON.stringify(captions)
+  const mode = getStorageMode()
   
-  if (USE_LOCAL_STORAGE) {
-    return await saveToLocal(`vision/${jobId}.json`, data)
-  } else {
-    const blob = await put(`vision/${jobId}.json`, data, {
-      access: 'public',
-    })
-    return blob.url
+  try {
+    if (mode === 'local') {
+      return await saveToLocal(`vision/${jobId}.json`, data)
+    } else if (mode === 'memory') {
+      return await saveToMemory(`vision/${jobId}.json`, data)
+    } else {
+      const blob = await put(`vision/${jobId}.json`, data, {
+        access: 'public',
+      })
+      return blob.url
+    }
+  } catch (error) {
+    if (mode === 'local') {
+      console.warn('Local storage failed, falling back to memory:', error)
+      storageMode = 'memory'
+      return await saveToMemory(`vision/${jobId}.json`, data)
+    } else {
+      throw error
+    }
   }
 }
 
 export async function getVisionCaptions(jobId: string): Promise<VisionCaption[] | null> {
   try {
-    if (USE_LOCAL_STORAGE) {
+    const mode = getStorageMode()
+    
+    if (mode === 'local') {
       const data = await readFromLocal(`vision/${jobId}.json`)
       if (!data) return null
       return JSON.parse(data.toString())
+    } else if (mode === 'memory') {
+      const data = await readFromMemory(`vision/${jobId}.json`)
+      if (!data) return null
+      return JSON.parse(data)
     } else {
       const response = await fetch(`${process.env.BLOB_READ_WRITE_TOKEN}/vision/${jobId}.json`)
       if (!response.ok) return null
       return await response.json()
     }
-  } catch {
+  } catch (error) {
+    console.warn('Failed to get vision captions:', error)
     return null
   }
 }
 
 export async function saveSummary(jobId: string, summary: Summary): Promise<string> {
   const data = JSON.stringify(summary)
+  const mode = getStorageMode()
   
-  if (USE_LOCAL_STORAGE) {
-    return await saveToLocal(`summaries/${jobId}.json`, data)
-  } else {
-    const blob = await put(`summaries/${jobId}.json`, data, {
-      access: 'public',
-    })
-    return blob.url
+  try {
+    if (mode === 'local') {
+      return await saveToLocal(`summaries/${jobId}.json`, data)
+    } else if (mode === 'memory') {
+      return await saveToMemory(`summaries/${jobId}.json`, data)
+    } else {
+      const blob = await put(`summaries/${jobId}.json`, data, {
+        access: 'public',
+      })
+      return blob.url
+    }
+  } catch (error) {
+    if (mode === 'local') {
+      console.warn('Local storage failed, falling back to memory:', error)
+      storageMode = 'memory'
+      return await saveToMemory(`summaries/${jobId}.json`, data)
+    } else {
+      throw error
+    }
   }
 }
 
 export async function getSummary(jobId: string): Promise<Summary | null> {
   try {
-    if (USE_LOCAL_STORAGE) {
+    const mode = getStorageMode()
+    
+    if (mode === 'local') {
       const data = await readFromLocal(`summaries/${jobId}.json`)
       if (!data) return null
       return JSON.parse(data.toString())
+    } else if (mode === 'memory') {
+      const data = await readFromMemory(`summaries/${jobId}.json`)
+      if (!data) return null
+      return JSON.parse(data)
     } else {
       const response = await fetch(`${process.env.BLOB_READ_WRITE_TOKEN}/summaries/${jobId}.json`)
       if (!response.ok) return null
       return await response.json()
     }
-  } catch {
+  } catch (error) {
+    console.warn('Failed to get summary:', error)
     return null
   }
 }
 
 export async function saveKeyframe(jobId: string, frameIndex: number, frameBuffer: Buffer): Promise<string> {
-  if (USE_LOCAL_STORAGE) {
-    const filePath = `keyframes/${jobId}-${frameIndex}.jpg`
-    await saveToLocal(filePath, frameBuffer)
-    // Return a data URL for local access
-    const base64 = frameBuffer.toString('base64')
-    return `data:image/jpeg;base64,${base64}`
-  } else {
-    const blob = await put(`keyframes/${jobId}-${frameIndex}.jpg`, frameBuffer, {
-      access: 'public',
-    })
-    return blob.url
+  const mode = getStorageMode()
+  
+  try {
+    if (mode === 'local') {
+      const filePath = `keyframes/${jobId}-${frameIndex}.jpg`
+      await saveToLocal(filePath, frameBuffer)
+      // Return a data URL for local access
+      const base64 = frameBuffer.toString('base64')
+      return `data:image/jpeg;base64,${base64}`
+    } else if (mode === 'memory') {
+      const filePath = `keyframes/${jobId}-${frameIndex}.jpg`
+      const base64 = frameBuffer.toString('base64')
+      await saveToMemory(filePath, base64)
+      return `data:image/jpeg;base64,${base64}`
+    } else {
+      const blob = await put(`keyframes/${jobId}-${frameIndex}.jpg`, frameBuffer, {
+        access: 'public',
+      })
+      return blob.url
+    }
+  } catch (error) {
+    if (mode === 'local') {
+      console.warn('Local storage failed, falling back to memory:', error)
+      storageMode = 'memory'
+      const filePath = `keyframes/${jobId}-${frameIndex}.jpg`
+      const base64 = frameBuffer.toString('base64')
+      await saveToMemory(filePath, base64)
+      return `data:image/jpeg;base64,${base64}`
+    } else {
+      throw error
+    }
   }
 }
 
 export async function cleanupJobFiles(jobId: string): Promise<void> {
   try {
-    if (USE_LOCAL_STORAGE) {
+    const mode = getStorageMode()
+    
+    if (mode === 'local') {
       // Clean up local files
       const patterns = [
         `jobs/${jobId}.json`,
@@ -226,6 +349,21 @@ export async function cleanupJobFiles(jobId: string): Promise<void> {
       // Clean up keyframes
       for (let i = 0; i < 24; i++) {
         await deleteFromLocal(`keyframes/${jobId}-${i}.jpg`)
+      }
+    } else if (mode === 'memory') {
+      // Clean up memory storage
+      const patterns = [
+        `jobs/${jobId}.json`,
+        `transcripts/${jobId}.json`,
+        `vision/${jobId}.json`,
+        `summaries/${jobId}.json`
+      ]
+      
+      await Promise.all(patterns.map(pattern => deleteFromMemory(pattern)))
+      
+      // Clean up keyframes
+      for (let i = 0; i < 24; i++) {
+        await deleteFromMemory(`keyframes/${jobId}-${i}.jpg`)
       }
     } else {
       const { blobs } = await list({ prefix: jobId })
