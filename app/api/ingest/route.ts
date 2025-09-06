@@ -25,9 +25,13 @@ export async function POST(request: NextRequest) {
       progress: 0
     }
 
+    console.log('Saving job data:', jobId, job)
     await saveJobData(jobId, job)
+    console.log('Job data saved successfully')
     
+    console.log('Enqueueing transcription:', jobId, body.url)
     await enqueueTranscription(jobId, body.url)
+    console.log('Transcription enqueued')
 
     const response: IngestResponse = {
       jobId,
