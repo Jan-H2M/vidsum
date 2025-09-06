@@ -26,8 +26,13 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('Saving job data:', jobId, job)
-    await saveJobData(jobId, job)
-    console.log('Job data saved successfully')
+    try {
+      await saveJobData(jobId, job)
+      console.log('Job data saved successfully')
+    } catch (saveError) {
+      console.error('FATAL: saveJobData failed:', saveError)
+      throw saveError
+    }
     
     console.log('Enqueueing transcription:', jobId, body.url)
     await enqueueTranscription(jobId, body.url)
