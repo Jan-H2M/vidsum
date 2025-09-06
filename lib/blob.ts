@@ -42,25 +42,24 @@ function getStorageMode(): 'local' | 'memory' | 'blob' {
     
   // Detect Vercel serverless environment by path and environment
   const cwd = process.cwd()
-  const isVercelServerless = !!(
+  
+  // AGGRESSIVE Vercel detection - if ANY of these are true, use memory
+  const isServerless = !!(
     cwd.startsWith('/var/task') ||                    // Vercel serverless path
+    cwd.startsWith('/var/runtime') ||                 // Alternative AWS path
     process.env.LAMBDA_TASK_ROOT ||                   // Always set in Vercel
     process.env.LAMBDA_RUNTIME_DIR ||                 // Always set in Vercel  
     process.env.AWS_REGION ||                         // Set in Vercel functions
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||          // AWS Lambda
     process.env.VERCEL === '1' ||                     // If system vars enabled
-    process.env.VERCEL_ENV                            // If system vars enabled
+    process.env.VERCEL_ENV ||                         // If system vars enabled
+    process.env.NETLIFY ||                            // Netlify
+    process.env.RAILWAY_ENVIRONMENT ||               // Railway
+    process.env.RENDER ||                             // Render
+    (process.env.NODE_ENV === 'production')          // ANY production environment
   )
   
-  // Other serverless environments
-  const isOtherServerless = !!(
-    process.env.NETLIFY ||
-    process.env.AWS_LAMBDA_FUNCTION_NAME ||
-    process.env.RAILWAY_ENVIRONMENT ||
-    process.env.RENDER ||
-    (process.env.NODE_ENV === 'production' && process.env.CI)
-  )
-  
-  console.log('Storage detection:', {
+  console.log('AGGRESSIVE Storage detection:', {
     cwd,
     NODE_ENV: process.env.NODE_ENV,
     VERCEL: process.env.VERCEL,
@@ -69,21 +68,21 @@ function getStorageMode(): 'local' | 'memory' | 'blob' {
     LAMBDA_RUNTIME_DIR: process.env.LAMBDA_RUNTIME_DIR,
     AWS_REGION: process.env.AWS_REGION,
     hasBlob,
-    isVercelServerless,
-    isOtherServerless
+    isServerless
   })
   
-  // Priority order: Blob > Memory (serverless) > Local (development)
+  // Priority order: Blob > Memory (almost always) > Local (dev only)
   if (hasBlob) {
     storageMode = 'blob'
-  } else if (isVercelServerless || isOtherServerless) {
+    console.log('Using BLOB storage (has token)')
+  } else if (isServerless) {
     storageMode = 'memory'
+    console.log('Using MEMORY storage (serverless detected)')
   } else {
-    // Default to memory for safety, will test filesystem later
-    storageMode = 'memory'
+    storageMode = 'memory'  // ALWAYS default to memory now!
+    console.log('Using MEMORY storage (safe default)')
   }
   
-  console.log(`Selected ${storageMode} storage mode`)
   return storageMode
 }
 
@@ -149,17 +148,10 @@ async function deleteFromMemory(key: string): Promise<void> {
 
 export async function saveJobData(jobId: string, job: Job): Promise<void> {
   const data = JSON.stringify(job)
-  let mode = getStorageMode()
+  const mode = getStorageMode()
   
-  // If we initially selected memory but haven't tested filesystem yet, test it
-  if (mode === 'memory' && !filesystemTestAttempted) {
-    const canWrite = await canUseFilesystem()
-    if (canWrite) {
-      storageMode = 'local'
-      mode = 'local'
-      console.log('Filesystem test passed, switching to local storage')
-    }
-  }
+  // NEVER test filesystem in production - just use the detected mode
+  console.log(`saveJobData: Using ${mode} storage for job ${jobId}`)
   
   try {
     if (mode === 'blob') {
@@ -167,19 +159,18 @@ export async function saveJobData(jobId: string, job: Job): Promise<void> {
         access: 'public',
       })
     } else if (mode === 'local') {
+      // Only use local if we're absolutely sure (development only)
       await saveToLocal(`jobs/${jobId}.json`, data)
     } else {
+      // Memory storage - always safe
       await saveToMemory(`jobs/${jobId}.json`, data)
     }
   } catch (error) {
-    // Fallback to memory if any operation fails
-    if (mode !== 'memory') {
-      console.warn(`${mode} storage failed, falling back to memory:`, error)
-      storageMode = 'memory'
-      await saveToMemory(`jobs/${jobId}.json`, data)
-    } else {
-      throw error
-    }
+    // Ultimate fallback - memory storage
+    console.error(`${mode} storage failed for job ${jobId}:`, error)
+    console.log('Falling back to memory storage')
+    storageMode = 'memory'
+    await saveToMemory(`jobs/${jobId}.json`, data)
   }
 }
 
