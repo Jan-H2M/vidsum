@@ -3,10 +3,16 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { Job, Summary, TranscriptSegment, VisionCaption } from './types'
 
-// Use local storage for development, Vercel Blob for production
-const USE_LOCAL_STORAGE = process.env.NODE_ENV !== 'production' || 
-  !process.env.BLOB_READ_WRITE_TOKEN || 
-  process.env.BLOB_READ_WRITE_TOKEN === 'your_vercel_blob_token_here'
+// Use local storage for development, Vercel Blob for production, memory as fallback
+const HAS_BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN && 
+  process.env.BLOB_READ_WRITE_TOKEN !== 'your_vercel_blob_token_here'
+
+const USE_LOCAL_STORAGE = process.env.NODE_ENV !== 'production'
+
+const USE_MEMORY_STORAGE = process.env.NODE_ENV === 'production' && !HAS_BLOB_TOKEN
+
+// In-memory storage for serverless fallback
+const memoryStorage = new Map<string, any>()
 
 const LOCAL_STORAGE_DIR = path.join(process.cwd(), '.vidsum-storage')
 
@@ -44,11 +50,27 @@ async function deleteFromLocal(filePath: string): Promise<void> {
   }
 }
 
+// Memory storage functions for serverless fallback
+async function saveToMemory(key: string, data: any): Promise<string> {
+  memoryStorage.set(key, data)
+  return `memory://${key}`
+}
+
+async function readFromMemory(key: string): Promise<any> {
+  return memoryStorage.get(key) || null
+}
+
+async function deleteFromMemory(key: string): Promise<void> {
+  memoryStorage.delete(key)
+}
+
 export async function saveJobData(jobId: string, job: Job): Promise<void> {
   const data = JSON.stringify(job)
   
   if (USE_LOCAL_STORAGE) {
     await saveToLocal(`jobs/${jobId}.json`, data)
+  } else if (USE_MEMORY_STORAGE) {
+    await saveToMemory(`jobs/${jobId}.json`, data)
   } else {
     await put(`jobs/${jobId}.json`, data, {
       access: 'public',
@@ -62,6 +84,10 @@ export async function getJobData(jobId: string): Promise<Job | null> {
       const data = await readFromLocal(`jobs/${jobId}.json`)
       if (!data) return null
       return JSON.parse(data.toString())
+    } else if (USE_MEMORY_STORAGE) {
+      const data = await readFromMemory(`jobs/${jobId}.json`)
+      if (!data) return null
+      return JSON.parse(data)
     } else {
       const response = await fetch(`${process.env.BLOB_READ_WRITE_TOKEN}/jobs/${jobId}.json`)
       if (!response.ok) return null
@@ -77,6 +103,8 @@ export async function saveTranscript(jobId: string, segments: TranscriptSegment[
   
   if (USE_LOCAL_STORAGE) {
     return await saveToLocal(`transcripts/${jobId}.json`, data)
+  } else if (USE_MEMORY_STORAGE) {
+    return await saveToMemory(`transcripts/${jobId}.json`, data)
   } else {
     const blob = await put(`transcripts/${jobId}.json`, data, {
       access: 'public',
