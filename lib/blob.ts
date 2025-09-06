@@ -8,6 +8,31 @@ const memoryStorage = new Map<string, any>()
 
 // Storage mode cache
 let storageMode: 'local' | 'memory' | 'blob' | null = null
+let filesystemTestAttempted = false
+
+async function canUseFilesystem(): Promise<boolean> {
+  if (filesystemTestAttempted) {
+    return storageMode === 'local'
+  }
+  
+  try {
+    const testDir = path.join(process.cwd(), '.test-write-access')
+    const testFile = path.join(testDir, 'test.txt')
+    
+    await fs.mkdir(testDir, { recursive: true })
+    await fs.writeFile(testFile, 'test')
+    await fs.unlink(testFile)
+    await fs.rmdir(testDir)
+    
+    console.log('Filesystem write test: SUCCESS')
+    return true
+  } catch (error) {
+    console.log('Filesystem write test: FAILED', error)
+    return false
+  } finally {
+    filesystemTestAttempted = true
+  }
+}
 
 function getStorageMode(): 'local' | 'memory' | 'blob' {
   if (storageMode) return storageMode
@@ -15,41 +40,60 @@ function getStorageMode(): 'local' | 'memory' | 'blob' {
   const hasBlob = process.env.BLOB_READ_WRITE_TOKEN && 
     process.env.BLOB_READ_WRITE_TOKEN !== 'your_vercel_blob_token_here'
     
-  // Detect serverless environment (Vercel, Netlify, AWS Lambda, etc.)
-  const isServerless = !!(
-    process.env.VERCEL === '1' || 
-    process.env.VERCEL_ENV || 
+  // Detect Vercel serverless environment by path and environment
+  const cwd = process.cwd()
+  const isVercelServerless = !!(
+    cwd.startsWith('/var/task') ||                    // Vercel serverless path
+    process.env.LAMBDA_TASK_ROOT ||                   // Always set in Vercel
+    process.env.LAMBDA_RUNTIME_DIR ||                 // Always set in Vercel  
+    process.env.AWS_REGION ||                         // Set in Vercel functions
+    process.env.VERCEL === '1' ||                     // If system vars enabled
+    process.env.VERCEL_ENV                            // If system vars enabled
+  )
+  
+  // Other serverless environments
+  const isOtherServerless = !!(
     process.env.NETLIFY ||
     process.env.AWS_LAMBDA_FUNCTION_NAME ||
-    process.env.LAMBDA_TASK_ROOT ||
-    process.env.NODE_ENV === 'production' && process.env.CI
+    process.env.RAILWAY_ENVIRONMENT ||
+    process.env.RENDER ||
+    (process.env.NODE_ENV === 'production' && process.env.CI)
   )
   
   console.log('Storage detection:', {
+    cwd,
     NODE_ENV: process.env.NODE_ENV,
     VERCEL: process.env.VERCEL,
     VERCEL_ENV: process.env.VERCEL_ENV,
+    LAMBDA_TASK_ROOT: process.env.LAMBDA_TASK_ROOT,
+    LAMBDA_RUNTIME_DIR: process.env.LAMBDA_RUNTIME_DIR,
+    AWS_REGION: process.env.AWS_REGION,
     hasBlob,
-    isServerless
+    isVercelServerless,
+    isOtherServerless
   })
   
+  // Priority order: Blob > Memory (serverless) > Local (development)
   if (hasBlob) {
     storageMode = 'blob'
-  } else if (isServerless) {
+  } else if (isVercelServerless || isOtherServerless) {
     storageMode = 'memory'
   } else {
-    storageMode = 'local'
+    // Default to memory for safety, will test filesystem later
+    storageMode = 'memory'
   }
   
-  console.log(`Using ${storageMode} storage mode`)
+  console.log(`Selected ${storageMode} storage mode`)
   return storageMode
 }
 
-const LOCAL_STORAGE_DIR = path.join(process.cwd(), '.vidsum-storage')
+function getLocalStorageDir(): string {
+  return path.join(process.cwd(), '.vidsum-storage')
+}
 
-async function ensureLocalDir() {
+async function ensureLocalDir(localDir: string) {
   try {
-    await fs.mkdir(LOCAL_STORAGE_DIR, { recursive: true })
+    await fs.mkdir(localDir, { recursive: true })
   } catch (error) {
     // If we can't create directories (read-only filesystem), fallback to memory
     console.warn('Cannot create local storage directory, switching to memory storage:', error)
@@ -59,8 +103,9 @@ async function ensureLocalDir() {
 }
 
 async function saveToLocal(filePath: string, data: string | Buffer): Promise<string> {
-  await ensureLocalDir()
-  const fullPath = path.join(LOCAL_STORAGE_DIR, filePath)
+  const localDir = getLocalStorageDir()
+  await ensureLocalDir(localDir)
+  const fullPath = path.join(localDir, filePath)
   const dir = path.dirname(fullPath)
   await fs.mkdir(dir, { recursive: true })
   await fs.writeFile(fullPath, data)
@@ -69,7 +114,8 @@ async function saveToLocal(filePath: string, data: string | Buffer): Promise<str
 
 async function readFromLocal(filePath: string): Promise<Buffer | null> {
   try {
-    const fullPath = path.join(LOCAL_STORAGE_DIR, filePath)
+    const localDir = getLocalStorageDir()
+    const fullPath = path.join(localDir, filePath)
     const data = await fs.readFile(fullPath)
     return data
   } catch {
@@ -79,7 +125,8 @@ async function readFromLocal(filePath: string): Promise<Buffer | null> {
 
 async function deleteFromLocal(filePath: string): Promise<void> {
   try {
-    const fullPath = path.join(LOCAL_STORAGE_DIR, filePath)
+    const localDir = getLocalStorageDir()
+    const fullPath = path.join(localDir, filePath)
     await fs.unlink(fullPath)
   } catch {
     // Ignore errors if file doesn't exist
@@ -102,22 +149,32 @@ async function deleteFromMemory(key: string): Promise<void> {
 
 export async function saveJobData(jobId: string, job: Job): Promise<void> {
   const data = JSON.stringify(job)
-  const mode = getStorageMode()
+  let mode = getStorageMode()
+  
+  // If we initially selected memory but haven't tested filesystem yet, test it
+  if (mode === 'memory' && !filesystemTestAttempted) {
+    const canWrite = await canUseFilesystem()
+    if (canWrite) {
+      storageMode = 'local'
+      mode = 'local'
+      console.log('Filesystem test passed, switching to local storage')
+    }
+  }
   
   try {
-    if (mode === 'local') {
-      await saveToLocal(`jobs/${jobId}.json`, data)
-    } else if (mode === 'memory') {
-      await saveToMemory(`jobs/${jobId}.json`, data)
-    } else {
+    if (mode === 'blob') {
       await put(`jobs/${jobId}.json`, data, {
         access: 'public',
       })
+    } else if (mode === 'local') {
+      await saveToLocal(`jobs/${jobId}.json`, data)
+    } else {
+      await saveToMemory(`jobs/${jobId}.json`, data)
     }
   } catch (error) {
-    // Fallback to memory if filesystem operations fail
-    if (mode === 'local') {
-      console.warn('Local storage failed, falling back to memory:', error)
+    // Fallback to memory if any operation fails
+    if (mode !== 'memory') {
+      console.warn(`${mode} storage failed, falling back to memory:`, error)
       storageMode = 'memory'
       await saveToMemory(`jobs/${jobId}.json`, data)
     } else {
@@ -130,18 +187,18 @@ export async function getJobData(jobId: string): Promise<Job | null> {
   try {
     const mode = getStorageMode()
     
-    if (mode === 'local') {
-      const data = await readFromLocal(`jobs/${jobId}.json`)
-      if (!data) return null
-      return JSON.parse(data.toString())
-    } else if (mode === 'memory') {
-      const data = await readFromMemory(`jobs/${jobId}.json`)
-      if (!data) return null
-      return JSON.parse(data)
-    } else {
+    if (mode === 'blob') {
       const response = await fetch(`${process.env.BLOB_READ_WRITE_TOKEN}/jobs/${jobId}.json`)
       if (!response.ok) return null
       return await response.json()
+    } else if (mode === 'local') {
+      const data = await readFromLocal(`jobs/${jobId}.json`)
+      if (!data) return null
+      return JSON.parse(data.toString())
+    } else {
+      const data = await readFromMemory(`jobs/${jobId}.json`)
+      if (!data) return null
+      return JSON.parse(data)
     }
   } catch (error) {
     console.warn('Failed to get job data:', error)
