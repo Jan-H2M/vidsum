@@ -54,7 +54,7 @@ export interface Summary {
     transcriptProvider: string
     visionProvider: string
     ocrProvider?: string
-    llm: "Claude"
+    llm: "Claude" | "OpenAI GPT-4"
   }
 }
 
