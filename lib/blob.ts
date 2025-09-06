@@ -125,17 +125,22 @@ export async function saveJobData(jobId: string, job: Job): Promise<void> {
   
   try {
     if (mode === 'blob') {
-      await put(`jobs/${jobId}.json`, data, {
+      console.log('Attempting to save to blob:', `jobs/${jobId}.json`)
+      const result = await put(`jobs/${jobId}.json`, data, {
         access: 'public',
         addRandomSuffix: false,
       })
+      console.log('Blob save successful:', result.url)
     } else if (mode === 'local') {
       await saveToLocal(`jobs/${jobId}.json`, data)
     } else {
       await saveToMemory(`jobs/${jobId}.json`, data)
     }
   } catch (error) {
-    console.error(`${mode} storage failed for job ${jobId}:`, error)
+    console.error(`CRITICAL: ${mode} storage failed for job ${jobId}:`, error)
+    console.error('Error details:', error.message, error.stack)
+    // Force memory storage as absolute fallback
+    console.log('FALLBACK: Switching to memory storage')
     storageMode = 'memory'
     await saveToMemory(`jobs/${jobId}.json`, data)
   }
