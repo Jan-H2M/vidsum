@@ -34,45 +34,28 @@ async function canUseFilesystem(): Promise<boolean> {
 }
 
 function getStorageMode(): 'local' | 'memory' | 'blob' {
-  if (process.env.NODE_ENV === 'production') {
-    const hasBlob = process.env.BLOB_READ_WRITE_TOKEN && 
-      process.env.BLOB_READ_WRITE_TOKEN !== 'your_vercel_blob_token_here'
-    
-    return hasBlob ? 'blob' : 'memory'
-  }
-
   if (storageMode) return storageMode
 
   const hasBlob = process.env.BLOB_READ_WRITE_TOKEN && 
     process.env.BLOB_READ_WRITE_TOKEN !== 'your_vercel_blob_token_here'
-    
-  // Detect ANY serverless environment
-  const cwd = process.cwd()
   
-  const isServerless = !!(
-    cwd.includes('/var/') ||                          // ANY /var path (serverless)
-    cwd.includes('lambda') ||                         // Lambda in path
-    cwd.includes('serverless') ||                     // Serverless in path
-    process.env.LAMBDA_TASK_ROOT ||                   
-    process.env.LAMBDA_RUNTIME_DIR ||                 
-    process.env.AWS_REGION ||                         
-    process.env.AWS_LAMBDA_FUNCTION_NAME ||          
-    process.env.VERCEL === '1' ||                     
-    process.env.VERCEL_ENV ||                         
-    process.env.NETLIFY ||                            
-    process.env.RAILWAY_ENVIRONMENT ||               
-    process.env.RENDER
-  )
-  
-  
+  // Always use blob storage when token is available (dev or production)
   if (hasBlob) {
     storageMode = 'blob'
-  } else if (isServerless) {
-    storageMode = 'memory'
-  } else {
-    storageMode = 'memory'
+    console.log('Using BLOB storage (token available)')
+    return storageMode
   }
   
+  // For production without blob token, use memory
+  if (process.env.NODE_ENV === 'production') {
+    storageMode = 'memory'
+    console.log('Using MEMORY storage (production without blob token)')
+    return storageMode
+  }
+  
+  // For development without blob token, try local filesystem
+  storageMode = 'local'
+  console.log('Using LOCAL storage (development)')
   return storageMode
 }
 
