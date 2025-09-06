@@ -128,7 +128,6 @@ export async function saveJobData(jobId: string, job: Job): Promise<void> {
       console.log('Attempting to save to blob:', `jobs/${jobId}.json`)
       const result = await put(`jobs/${jobId}.json`, data, {
         access: 'public',
-        addRandomSuffix: false,
       })
       console.log('Blob save successful:', result.url)
     } else if (mode === 'local') {
@@ -153,8 +152,8 @@ export async function getJobData(jobId: string): Promise<Job | null> {
     if (mode === 'blob') {
       try {
         const { blobs } = await list()
-        const targetPath = `jobs/${jobId}.json`
-        const jobBlob = blobs.find(b => b.pathname === targetPath)
+        // Use prefix matching since Vercel adds random suffixes
+        const jobBlob = blobs.find(b => b.pathname.startsWith(`jobs/${jobId}`))  
         
         if (!jobBlob) {
           return null
@@ -229,10 +228,9 @@ export async function getTranscript(jobId: string): Promise<TranscriptSegment[] 
       if (!data) return null
       return JSON.parse(data)
     } else {
-      // Use proper blob API
+      // Use proper blob API with prefix matching
       const { blobs } = await list()
-      const targetPath = `transcripts/${jobId}.json`
-      const blob = blobs.find(b => b.pathname === targetPath)
+      const blob = blobs.find(b => b.pathname.startsWith(`transcripts/${jobId}`))
       if (!blob) return null
       const response = await fetch(blob.url)
       if (!response.ok) return null
@@ -283,10 +281,9 @@ export async function getVisionCaptions(jobId: string): Promise<VisionCaption[] 
       if (!data) return null
       return JSON.parse(data)
     } else {
-      // Use proper blob API
+      // Use proper blob API with prefix matching
       const { blobs } = await list()
-      const targetPath = `vision/${jobId}.json`
-      const blob = blobs.find(b => b.pathname === targetPath)
+      const blob = blobs.find(b => b.pathname.startsWith(`vision/${jobId}`))
       if (!blob) return null
       const response = await fetch(blob.url)
       if (!response.ok) return null
@@ -337,10 +334,9 @@ export async function getSummary(jobId: string): Promise<Summary | null> {
       if (!data) return null
       return JSON.parse(data)
     } else {
-      // Use proper blob API
+      // Use proper blob API with prefix matching
       const { blobs } = await list()
-      const targetPath = `summaries/${jobId}.json`
-      const blob = blobs.find(b => b.pathname === targetPath)
+      const blob = blobs.find(b => b.pathname.startsWith(`summaries/${jobId}`))
       if (!blob) return null
       const response = await fetch(blob.url)
       if (!response.ok) return null
