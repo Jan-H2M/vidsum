@@ -1,5 +1,7 @@
 # VidSum - AI Video Summarization (OpenAI Edition)
 
+![Deploy Status](https://img.shields.io/badge/deploy-vercel-black)
+
 A streamlined Next.js application that transforms video content into intelligent summaries using OpenAI's powerful AI services. Now simplified to use **only OpenAI** - no multiple API keys needed!
 
 ## ✨ What's New - Simplified Version
