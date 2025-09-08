@@ -15,11 +15,17 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log(`Processing step ${message.step} for job ${message.jobId}`)
+    console.log(`Worker received: step ${message.step} for job ${message.jobId}`)
 
-    await processVideoStep(message)
+    // Process in background without awaiting
+    processVideoStep(message).then(() => {
+      console.log(`Worker completed: step ${message.step} for job ${message.jobId}`)
+    }).catch(error => {
+      console.error(`Worker failed: step ${message.step} for job ${message.jobId}`, error)
+    })
 
-    return NextResponse.json({ success: true })
+    // Return immediately to allow background processing
+    return NextResponse.json({ success: true, message: 'Processing started' })
   } catch (error) {
     console.error('Worker error:', error)
     return NextResponse.json(

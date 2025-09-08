@@ -29,8 +29,9 @@ export async function POST(request: NextRequest) {
     await saveJobData(jobId, job)
     console.log('Job saved successfully, now enqueueing...')
     
-    // Skip background queue for now - just mark as processing
-    // await enqueueTranscription(jobId, body.url)
+    // Start background processing
+    await enqueueTranscription(jobId, body.url)
+    console.log('Job enqueued for processing')
 
     const response: IngestResponse = {
       jobId,

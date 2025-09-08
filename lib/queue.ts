@@ -12,16 +12,33 @@ const jobQueue: Map<string, QueueMessage[]> = new Map()
 export async function enqueueJob(message: QueueMessage, delaySeconds = 0): Promise<string> {
   const messageId = `${message.jobId}-${message.step}-${Date.now()}`
   
-  if (delaySeconds > 0) {
-    // Schedule the job to run after delay
-    setTimeout(() => {
-      processQueueMessage(message)
-    }, delaySeconds * 1000)
-  } else {
-    // Process immediately in the background
-    setImmediate(() => {
-      processQueueMessage(message)
+  // In production (Vercel), use API call for background processing
+  if (process.env.NODE_ENV === 'production' || process.env.VERCEL) {
+    const baseUrl = process.env.VERCEL_URL 
+      ? `https://${process.env.VERCEL_URL}` 
+      : 'https://vidsum-gamma.vercel.app'
+    
+    // Don't await - let it run in background
+    fetch(`${baseUrl}/api/worker`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(message)
+    }).catch(error => {
+      console.error('Failed to enqueue job:', error)
     })
+  } else {
+    // In development, process immediately
+    if (delaySeconds > 0) {
+      setTimeout(() => {
+        processQueueMessage(message)
+      }, delaySeconds * 1000)
+    } else {
+      setImmediate(() => {
+        processQueueMessage(message)
+      })
+    }
   }
   
   return messageId
