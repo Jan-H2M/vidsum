@@ -34,22 +34,29 @@ async function canUseFilesystem(): Promise<boolean> {
 }
 
 function getStorageMode(): 'local' | 'memory' | 'blob' {
+  // Don't cache storage mode in production to ensure fresh checks
+  if (process.env.NODE_ENV === 'production') {
+    const hasBlob = process.env.BLOB_READ_WRITE_TOKEN && 
+      process.env.BLOB_READ_WRITE_TOKEN !== 'your_vercel_blob_token_here'
+    
+    if (hasBlob) {
+      console.log('Using BLOB storage (production with token)')
+      return 'blob'
+    }
+    
+    console.log('WARNING: Using MEMORY storage in production (no blob token) - data will not persist!')
+    return 'memory'
+  }
+  
+  // Development mode - cache the storage mode
   if (storageMode) return storageMode
 
   const hasBlob = process.env.BLOB_READ_WRITE_TOKEN && 
     process.env.BLOB_READ_WRITE_TOKEN !== 'your_vercel_blob_token_here'
   
-  // Always use blob storage when token is available (dev or production)
   if (hasBlob) {
     storageMode = 'blob'
-    console.log('Using BLOB storage (token available)')
-    return storageMode
-  }
-  
-  // For production without blob token, use memory
-  if (process.env.NODE_ENV === 'production') {
-    storageMode = 'memory'
-    console.log('Using MEMORY storage (production without blob token)')
+    console.log('Using BLOB storage (development with token)')
     return storageMode
   }
   
@@ -123,31 +130,36 @@ export async function saveJobData(jobId: string, job: Job): Promise<void> {
   const data = JSON.stringify(job)
   const mode = getStorageMode()
   
+  console.log(`[saveJobData] Starting save for job ${jobId} using ${mode} mode`)
+  console.log(`[saveJobData] Environment: NODE_ENV=${process.env.NODE_ENV}, hasBlob=${!!process.env.BLOB_READ_WRITE_TOKEN}`)
+  
   try {
     if (mode === 'blob') {
-      console.log('Attempting to save to blob:', `jobs/${jobId}.json`)
+      console.log('[saveJobData] Attempting to save to blob:', `jobs/${jobId}.json`)
       const result = await put(`jobs/${jobId}.json`, data, {
         access: 'public',
         contentType: 'application/json',
       })
-      console.log('Blob save successful:', result.url)
+      console.log('[saveJobData] Blob save successful:', result.url)
+      console.log('[saveJobData] Blob pathname:', result.pathname)
       
       // Also save to memory as backup
       await saveToMemory(`jobs/${jobId}.json`, data)
-      console.log('Also saved to memory as backup')
+      console.log('[saveJobData] Also saved to memory as backup')
     } else if (mode === 'local') {
       await saveToLocal(`jobs/${jobId}.json`, data)
+      console.log('[saveJobData] Saved to local filesystem')
     } else {
       await saveToMemory(`jobs/${jobId}.json`, data)
+      console.log('[saveJobData] Saved to memory only')
     }
   } catch (error) {
-    console.error(`CRITICAL: ${mode} storage failed for job ${jobId}:`, error)
+    console.error(`[saveJobData] CRITICAL: ${mode} storage failed for job ${jobId}:`, error)
     if (error instanceof Error) {
-      console.error('Error details:', error.message, error.stack)
+      console.error('[saveJobData] Error details:', error.message, error.stack)
     }
     // Force memory storage as absolute fallback
-    console.log('FALLBACK: Switching to memory storage')
-    storageMode = 'memory'
+    console.log('[saveJobData] FALLBACK: Switching to memory storage')
     await saveToMemory(`jobs/${jobId}.json`, data)
   }
 }
