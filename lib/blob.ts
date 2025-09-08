@@ -128,8 +128,13 @@ export async function saveJobData(jobId: string, job: Job): Promise<void> {
       console.log('Attempting to save to blob:', `jobs/${jobId}.json`)
       const result = await put(`jobs/${jobId}.json`, data, {
         access: 'public',
+        contentType: 'application/json',
       })
       console.log('Blob save successful:', result.url)
+      
+      // Also save to memory as backup
+      await saveToMemory(`jobs/${jobId}.json`, data)
+      console.log('Also saved to memory as backup')
     } else if (mode === 'local') {
       await saveToLocal(`jobs/${jobId}.json`, data)
     } else {
@@ -137,7 +142,9 @@ export async function saveJobData(jobId: string, job: Job): Promise<void> {
     }
   } catch (error) {
     console.error(`CRITICAL: ${mode} storage failed for job ${jobId}:`, error)
-    console.error('Error details:', error.message, error.stack)
+    if (error instanceof Error) {
+      console.error('Error details:', error.message, error.stack)
+    }
     // Force memory storage as absolute fallback
     console.log('FALLBACK: Switching to memory storage')
     storageMode = 'memory'
@@ -151,13 +158,36 @@ export async function getJobData(jobId: string): Promise<Job | null> {
     
     if (mode === 'blob') {
       try {
+        console.log(`Getting job data for ${jobId} from blob storage`)
+        
+        // List all blobs to debug
         const { blobs } = await list()
-        // Use prefix matching since Vercel adds random suffixes
-        const jobBlob = blobs.find(b => b.pathname.startsWith(`jobs/${jobId}`))  
+        console.log(`Total blobs found: ${blobs.length}`)
+        
+        // Log all job blobs for debugging
+        const jobBlobs = blobs.filter(b => b.pathname.includes('jobs/'))
+        console.log(`Job blobs found: ${jobBlobs.map(b => b.pathname).join(', ')}`)
+        
+        // Use more flexible matching - check for jobId anywhere in the pathname
+        const jobBlob = blobs.find(b => b.pathname.includes(`jobs/${jobId}`))
         
         if (!jobBlob) {
+          console.log(`No blob found for job ${jobId}`)
+          // Try direct fetch as fallback
+          try {
+            const directUrl = `https://vidsum-gamma.vercel.app/api/blob/jobs/${jobId}.json`
+            console.log(`Trying direct fetch: ${directUrl}`)
+            const directResponse = await fetch(directUrl)
+            if (directResponse.ok) {
+              return await directResponse.json()
+            }
+          } catch (directError) {
+            console.log('Direct fetch also failed:', directError)
+          }
           return null
         }
+        
+        console.log(`Found blob for job ${jobId}: ${jobBlob.pathname}`)
         
         // Force fresh deployment - try downloadUrl first, fallback to url  
         const fetchUrl = jobBlob.downloadUrl || jobBlob.url
@@ -171,7 +201,13 @@ export async function getJobData(jobId: string): Promise<Job | null> {
         
         return await response.json()
       } catch (blobError) {
-        console.warn('Blob retrieval error:', blobError)
+        console.error('Blob retrieval error:', blobError)
+        // Fallback to memory storage
+        const data = await readFromMemory(`jobs/${jobId}.json`)
+        if (data) {
+          console.log('Found job in memory fallback')
+          return JSON.parse(data)
+        }
         return null
       }
     } else if (mode === 'local') {
@@ -184,7 +220,7 @@ export async function getJobData(jobId: string): Promise<Job | null> {
       return JSON.parse(data)
     }
   } catch (error) {
-    console.warn('Failed to get job data:', error)
+    console.error('Failed to get job data:', error)
     return null
   }
 }
